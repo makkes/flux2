@@ -20,6 +20,7 @@ Copyright (c) 2017 Diego Siqueira
 package tree
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/fluxcd/pkg/ssa"
@@ -35,13 +36,18 @@ const (
 )
 
 type (
+	AugmentedObjMetadata struct {
+		object.ObjMetadata
+		Info string
+	}
+
 	objMetadataTree struct {
-		Resource     object.ObjMetadata `json:"resource"`
-		ResourceTree []ObjMetadataTree  `json:"resources,omitempty"`
+		Resource     *AugmentedObjMetadata `json:"resource"`
+		ResourceTree []ObjMetadataTree    `json:"resources,omitempty"`
 	}
 
 	ObjMetadataTree interface {
-		Add(objMetadata object.ObjMetadata) ObjMetadataTree
+		Add(objMetadata *AugmentedObjMetadata) ObjMetadataTree
 		AddTree(tree ObjMetadataTree)
 		Items() []ObjMetadataTree
 		Text() string
@@ -56,14 +62,14 @@ type (
 	}
 )
 
-func New(objMetadata object.ObjMetadata) ObjMetadataTree {
+func New(objMetadata *AugmentedObjMetadata) ObjMetadataTree {
 	return &objMetadataTree{
 		Resource:     objMetadata,
 		ResourceTree: []ObjMetadataTree{},
 	}
 }
 
-func (t *objMetadataTree) Add(objMetadata object.ObjMetadata) ObjMetadataTree {
+func (t *objMetadataTree) Add(objMetadata *AugmentedObjMetadata) ObjMetadataTree {
 	n := New(objMetadata)
 	t.ResourceTree = append(t.ResourceTree, n)
 	return n
@@ -74,7 +80,11 @@ func (t *objMetadataTree) AddTree(tree ObjMetadataTree) {
 }
 
 func (t *objMetadataTree) Text() string {
-	return ssa.FmtObjMetadata(t.Resource)
+	res := ssa.FmtObjMetadata(t.Resource.ObjMetadata)
+	if t.Resource.Info != "" {
+		return fmt.Sprintf("%s (%s)", res, t.Resource.Info)
+	}
+	return res
 }
 
 func (t *objMetadataTree) Items() []ObjMetadataTree {

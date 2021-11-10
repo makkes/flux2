@@ -91,13 +91,17 @@ func treeKsCmdRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	kMeta, err := object.CreateObjMetadata(k.Namespace, k.Name,
+	var kMeta tree.AugmentedObjMetadata
+	kMeta.ObjMetadata, err = object.CreateObjMetadata(k.Namespace, k.Name,
 		schema.GroupKind{Group: kustomizev1.GroupVersion.Group, Kind: kustomizev1.KustomizationKind})
 	if err != nil {
 		return err
 	}
 
-	kTree := tree.New(kMeta)
+	if k.Spec.KubeConfig != nil {
+		kMeta.Info = "remote kustomization tree skipped"
+	}
+	kTree := tree.New(&kMeta)
 	err = treeKustomization(ctx, kTree, k, kubeClient, treeKsArgs.compact)
 	if err != nil {
 		return err
@@ -123,7 +127,7 @@ func treeKsCmdRun(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func treeKustomization(ctx context.Context, tree tree.ObjMetadataTree, item *kustomizev1.Kustomization, kubeClient client.Client, compact bool) error {
+func treeKustomization(ctx context.Context, objTree tree.ObjMetadataTree, item *kustomizev1.Kustomization, kubeClient client.Client, compact bool) error {
 	if item.Status.Inventory == nil || len(item.Status.Inventory.Entries) == 0 {
 		return nil
 	}
@@ -131,7 +135,9 @@ func treeKustomization(ctx context.Context, tree tree.ObjMetadataTree, item *kus
 	compactGroup := "toolkit.fluxcd.io"
 
 	for _, entry := range item.Status.Inventory.Entries {
-		objMetadata, err := object.ParseObjMetadata(entry.ID)
+		var objMetadata tree.AugmentedObjMetadata
+		var err error
+		objMetadata.ObjMetadata, err = object.ParseObjMetadata(entry.ID)
 		if err != nil {
 			return err
 		}
@@ -147,7 +153,7 @@ func treeKustomization(ctx context.Context, tree tree.ObjMetadataTree, item *kus
 			continue
 		}
 
-		ks := tree.Add(objMetadata)
+		ks := objTree.Add(&objMetadata)
 
 		if objMetadata.GroupKind.Group == helmv2.GroupVersion.Group &&
 			objMetadata.GroupKind.Kind == helmv2.HelmReleaseKind {
@@ -164,14 +170,17 @@ func treeKustomization(ctx context.Context, tree tree.ObjMetadataTree, item *kus
 				if compact && !strings.Contains(obj.GroupKind.Group, compactGroup) {
 					continue
 				}
-				ks.Add(obj)
+				ks.Add(&tree.AugmentedObjMetadata{ObjMetadata: obj})
 			}
 		}
 
 		if objMetadata.GroupKind.Group == kustomizev1.GroupVersion.Group &&
-			objMetadata.GroupKind.Kind == kustomizev1.KustomizationKind &&
+			objMetadata.GroupKind.Kind == kustomizev1.KustomizationKind {
 			// skip kustomization if it targets a remote clusters
-			item.Spec.KubeConfig == nil {
+			if item.Spec.KubeConfig != nil {
+				objMetadata.Info = "remote kustomization tree skipped"
+				continue
+			}
 			k := &kustomizev1.Kustomization{}
 			err = kubeClient.Get(ctx, client.ObjectKey{
 				Namespace: objMetadata.Namespace,
